@@ -1,0 +1,94 @@
+library(dplyr)
+library(sf)
+library(ggplot2)
+
+galls <- read.csv("C:\\Users\\LENOVO\\Downloads\\observations-301901.csv\\observations-301901.csv", header=T, sep=",") %>% 
+  as.data.frame() %>%
+  mutate(X = as.numeric(longitude), 
+         Y = as.numeric(latitude)) %>%
+  filter(!is.na(X)) %>%
+  st_as_sf(coords = c("X","Y"), crs = 4326, remove = FALSE)
+
+
+CAOP <- st_read("C:\\Users\\LENOVO\\Google Drive\\GalhasTrichi_Voluntarios\\Trichilogaster-volunteers\\Cont_AAD_CAOP2021\\Cont_AAD_CAOP2021.shp")
+CAOP <- st_transform(CAOP, crs = 4326)
+
+
+CAOP_f <- CAOP %>% #Freguesias
+  group_by(Distrito, Concelho, Freguesia) %>% 
+  summarise(geometry = st_union(geometry))
+
+CAOP_c <- CAOP %>% #Concelhos
+  group_by(Distrito, Concelho) %>% 
+  summarise(geometry = st_union(geometry))
+
+CAOP_d <- CAOP %>% #Distritos
+  group_by(Distrito) %>% 
+  summarise(geometry = st_union(geometry))
+
+
+galls$scientific_name <-  as.factor(galls$scientific_name)
+species <- unique(levels(galls$scientific_name))
+
+dir.create("C:\\Users\\LENOVO\\Documents\\Mapas_galhas_PT\\")
+dir.create("C:\\Users\\LENOVO\\Documents\\Mapas_galhas_PT\\shapefiles\\")
+dir.create("C:\\Users\\LENOVO\\Documents\\Mapas_galhas_PT\\images\\")
+#dir.create("./polygones_occur/shapes_finais/")
+out.dir <- ("C:\\Users\\LENOVO\\Documents\\Mapas_galhas_PT\\shapefiles\\")
+out.dir.images <- ("C:\\Users\\LENOVO\\Documents\\Mapas_galhas_PT\\images\\")
+
+system.time(
+  for (i in species){
+  filt <- filter(galls, scientific_name== i)
+  poly <- CAOP_c[filt, ]
+  poly$species <- paste(i)
+  st_write(poly, dsn=paste0(out.dir, "Concelhos_",i,".shp"),driver = "ESRI Shapefile")
+  poly_f <- CAOP_f[filt, ]
+  poly_f$species <- paste(i)
+  st_write(poly_f, dsn=paste0(out.dir, "Freguesias_",i,".shp"),driver = "ESRI Shapefile")
+  poly_d <- CAOP_d[filt, ]
+  poly_d$species <- paste(i)
+  st_write(poly_d, dsn=paste0(out.dir, "Distritos_",i,".shp"),driver = "ESRI Shapefile")
+  ggplot() + 
+    geom_sf(data = CAOP_c, fill="white") +
+    geom_sf(data = poly, fill="darkkhaki") +
+    ggtitle(paste0(i))+
+    theme(panel.grid.major = element_line(colour = "transparent"),
+          panel.border=element_blank(),
+          panel.background = element_blank(),
+          axis.ticks = element_blank(),
+          axis.text.x= element_blank(),
+          axis.text.y = element_blank(),
+          plot.title = element_text(hjust = 0.5, face = "italic", size = 14))
+  ggsave(paste0(out.dir.images, "Concelhos_",i,".png"), width = 14, height = 8, dpi = 300, units = "in", device='png')
+ 
+  ggplot() + 
+    geom_sf(data = CAOP_f, fill="white") +
+    geom_sf(data = poly_f, fill="darkkhaki") +
+    ggtitle(paste0(i))+
+    theme(panel.grid.major = element_line(colour = "transparent"),
+          panel.border=element_blank(),
+          panel.background = element_blank(),
+          axis.ticks = element_blank(),
+          axis.text.x= element_blank(),
+          axis.text.y = element_blank(),
+          plot.title = element_text(hjust = 0.5, face = "italic", size = 14))
+  ggsave(paste0(out.dir.images, "Freguesias_",i,".png"), width = 14, height = 8, dpi = 300, units = "in", device='png')
+
+  ggplot() + 
+    geom_sf(data = CAOP_d, fill="white") +
+    geom_sf(data = poly_d, fill="darkkhaki") +
+    ggtitle(paste0(i))+
+    theme(panel.grid.major = element_line(colour = "transparent"),
+          panel.border=element_blank(),
+          panel.background = element_blank(),
+          axis.ticks = element_blank(),
+          axis.text.x= element_blank(),
+          axis.text.y = element_blank(),
+          plot.title = element_text(hjust = 0.5, face = "italic", size = 14))
+  ggsave(paste0(out.dir.images, "Distritos_",i,".png"), width = 14, height = 8, dpi = 300, units = "in", device='png')
+  
+    print(i)
+}
+              )/60 #minutos utilizados
+
