@@ -2,6 +2,7 @@ library(dplyr)
 library(sf)
 library(ggplot2)
 library(ggspatial)
+library(tidyverse)
 
 CAOP <- st_read("C:\\Users\\LENOVO\\Google Drive\\GalhasTrichi_Voluntarios\\Trichilogaster-volunteers\\Cont_AAD_CAOP2021\\Cont_AAD_CAOP2021.shp")
 CAOP <- st_transform(CAOP, crs = 4326)
@@ -14,6 +15,15 @@ galls <- read.csv("C:\\Users\\LENOVO\\Downloads\\observations-301901.csv\\observ
   st_as_sf(coords = c("X","Y"), crs = 4326, remove = FALSE)
 
 galls <- st_join(galls, CAOP)
+
+galls_biblio <- read.csv("C:\\Users\\LENOVO\\Downloads\\observations-301901.csv\\observations-301901.csv", header=T, sep=",") %>% #registros bibliografia
+  as.data.frame() %>%
+  mutate(X = as.numeric(longitude), 
+         Y = as.numeric(latitude)) %>%
+  filter(!is.na(X)) %>%
+  st_as_sf(coords = c("X","Y"), crs = 4326, remove = FALSE)
+
+galls_biblio <- st_join(galls_biblio, CAOP)
 
 
 CAOP_f <- CAOP %>% #Freguesias
@@ -42,14 +52,24 @@ out.dir.images <- ("C:\\Users\\LENOVO\\Documents\\Mapas_galhas_PT\\images\\")
 system.time(
   for (i in species){
   filt <- filter(galls, scientific_name== i)
+  filt_biblio <- filter(galls_biblio, scientific_name== i) #linea con el filtrado del archivo bibliografia
 
   poly_d <- CAOP_d[filt, ]
   poly_d$species <- paste(i)
   st_write(poly_d, dsn=paste0(out.dir, i, "_Distritos_",".shp"),driver = "ESRI Shapefile")
+  
+  poly_d_biblio <- CAOP_d[filt_biblio, ] #poligonos con registros de bibliografia
+  poly_d_biblio$species <- paste(i)
+  st_write(poly_d_biblio, dsn=paste0(out.dir, i, "Literature_Distritos_",".shp"),driver = "ESRI Shapefile")
+  
+  gall_centroid <- poly_d_biblio  %>%  #cálculo de los centroides de bibliografia
+    mutate(X = map_dbl(geometry, ~st_point_on_surface(.x)[[1]]),
+           Y = map_dbl(geometry, ~st_point_on_surface(.x)[[2]]))
 
   ggplot() + 
     geom_sf(data = CAOP_d, fill="white") +
     geom_sf(data = poly_d, fill="darkkhaki") +
+    geom_point(data = gall_centroid,aes(x=X,y=Y))+ #esta linea es para colocar los puntos de la bibliografia
     ggtitle(paste0(i))+
     theme(panel.grid.major = element_line(colour = "transparent"),
           panel.border=element_blank(),
@@ -77,5 +97,7 @@ system.time(
     print(i)
 }
               )/60 #minutos utilizados
+
+
 
 
