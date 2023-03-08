@@ -3,6 +3,9 @@ library(sf)
 library(ggplot2)
 library(ggspatial)
 
+CAOP <- st_read("C:\\Users\\LENOVO\\Google Drive\\GalhasTrichi_Voluntarios\\Trichilogaster-volunteers\\Cont_AAD_CAOP2021\\Cont_AAD_CAOP2021.shp")
+CAOP <- st_transform(CAOP, crs = 4326)
+
 galls <- read.csv("C:\\Users\\LENOVO\\Downloads\\observations-301901.csv\\observations-301901.csv", header=T, sep=",") %>% 
   as.data.frame() %>%
   mutate(X = as.numeric(longitude), 
@@ -10,9 +13,7 @@ galls <- read.csv("C:\\Users\\LENOVO\\Downloads\\observations-301901.csv\\observ
   filter(!is.na(X)) %>%
   st_as_sf(coords = c("X","Y"), crs = 4326, remove = FALSE)
 
-
-CAOP <- st_read("C:\\Users\\LENOVO\\Google Drive\\GalhasTrichi_Voluntarios\\Trichilogaster-volunteers\\Cont_AAD_CAOP2021\\Cont_AAD_CAOP2021.shp")
-CAOP <- st_transform(CAOP, crs = 4326)
+galls <- st_join(galls, CAOP)
 
 
 CAOP_f <- CAOP %>% #Freguesias
@@ -76,6 +77,5 @@ system.time(
     print(i)
 }
               )/60 #minutos utilizados
-
 
 
