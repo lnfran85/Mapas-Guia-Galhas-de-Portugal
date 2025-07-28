@@ -13,8 +13,8 @@ setwd("I:\\O meu disco\\")
 if (!dir.exists("I:\\O meu disco\\Mapas_galhas_web")) {
   dir.create("I:\\O meu disco\\Mapas_galhas_web")
 }
-if (!dir.exists("I:\\O meu disco\\Mapas_galhas_web/shapefiles")) {
-  dir.create("I:\\O meu disco\\Mapas_galhas_web/shapefiles")
+if (!dir.exists("I:\\O meu disco\\shapefiles")) {
+  dir.create("I:\\O meu disco\\shapefiles")
 }
 
 
