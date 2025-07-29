@@ -25,6 +25,11 @@ distritos <- st_read("I:/O meu disco/CAOP_2024_distritos/Distritos_dissolvidos.s
 
 #galhas_inat <- get_inat_obs_project(88083,type="observations") 
 galhas_inat <- read.csv("C:\\Users\\LENOVO\\Downloads\\observations-599899.csv\\observations-599899.csv")
+galhas_inat <- galhas_inat %>%
+  mutate(
+    latitude = ifelse(!is.na(private_latitude) & private_latitude != "", private_latitude, latitude),
+    longitude = ifelse(!is.na(private_longitude) & private_longitude != "", private_longitude, longitude)
+  )
 ##galhas_biblio <- read_excel("galhas_biblio.xlsx")
 galhas_biblio <- galhas_inat
 
@@ -146,26 +151,29 @@ system.time({
       theme(
         legend.title = element_blank(),
         legend.position = "bottom",
+        legend.key.size = unit(0.8, "cm"),
+        legend.text = element_text(size = 16),
+        axis.title = element_text(size=16),
         axis.text = element_blank(),
         axis.ticks = element_blank(),
         panel.grid = element_blank()
-      ) +
-      annotation_scale(location = "br", bar_cols = c("grey60", "white")) +
-      annotation_north_arrow(location = "br", which_north = "true",
-                             pad_x = unit(0.15, "in"), pad_y = unit(0.4, "in"),
-                             style = north_arrow_minimal(fill = "grey40", line_col = "grey20"))
+      ) #+
+      #annotation_scale(location = "br", bar_cols = c("grey60", "white"), text_cex = 2.0) +
+      #annotation_north_arrow(location = "br", which_north = "true",
+      #                       pad_x = unit(0.15, "in"), pad_y = unit(0.4, "in"),
+      #                       style = north_arrow_minimal(fill = "grey40", line_col = "grey20", text_size = 14))
     
     # Save the map as a PNG file.
     ggsave(filename = paste0("Mapas_galhas_web/Distritos_", gsub(" ","_", species_name), ".png"), plot = mapa_final,  #mudar aqui por municipio se for o caso
-           width = 14, height = 8, dpi = 300)
+           width = 1400, height = 1400, units = "px", dpi = 96)
     
     # --- SHAPEFILE EXPORT ---
     # Save the corrected points as a shapefile.
-    if (nrow(coordenadas_corrigidas) > 0) {
-      st_write(coordenadas_corrigidas, paste0("shapefiles/Distritos_", gsub(" ", "_", species_name), "_points.shp"), delete_layer = TRUE)
-    } else {
-      message(paste("No corrected points to save for species:", species_name))
-    }
+    #if (nrow(coordenadas_corrigidas) > 0) {
+    #  st_write(coordenadas_corrigidas, paste0("shapefiles/Distritos_", gsub(" ", "_", species_name), "_points.shp"), delete_layer = TRUE)
+    #} else {
+    #  message(paste("No corrected points to save for species:", species_name))
+    #}
   }
 message("Todos os mapas e shapefiles para distritos criados!")
 }) /60 # time in minutes loop
@@ -186,15 +194,23 @@ distritos <- st_read("I:/O meu disco/CAOP_2024_distritos/Municipios_dissolvidos.
 
 #galhas_inat <- get_inat_obs_project(88083,type="observations") 
 galhas_inat <- read.csv("C:\\Users\\LENOVO\\Downloads\\observations-599899.csv\\observations-599899.csv")
+galhas_inat <- galhas_inat %>%
+  mutate(
+    latitude = ifelse(!is.na(private_latitude) & private_latitude != "", private_latitude, latitude),
+    longitude = ifelse(!is.na(private_longitude) & private_longitude != "", private_longitude, longitude)
+  )
 ##galhas_biblio <- read_excel("galhas_biblio.xlsx")
 galhas_biblio <- galhas_inat
 
 # --- ISLAND DEFINITIONS ---
 # These lists help in handling the specific coordinates for the Azores and Madeira.
-ilhas_acores <- c("Vila do Porto", "Lagoa", "Nordeste", "Ponta Delgada", "Povoação",
+ilhas_acores <- c("Vila do Porto", "Lagoa_Acores", "Nordeste", "Ponta Delgada", "Povoação",
                   "Ribeira Grande", "Vila Franca do Campo", "Angra do Heroísmo", "Praia da Vitória", "Santa Cruz da Graciosa",
-                  "Calheta de São Jorge", "Velas", "Lajes do Pico", "Madalena", "São Roque do Pico",
-                  "Horta", "Lajes das Flores", "Santa Cruz das Flores", "Corvo")
+                  "Calheta de São Jorge", "Velas", "Lajes do Pico", "Madalena", "São Roque do Pico","Horta", 
+                  "Lajes das Flores", 
+                  "Santa Cruz das Flores", 
+                  "Corvo")
+
 ilhas_madeira <- c("Calheta", "Câmara de Lobos", "Funchal", "Machico", "Ponta do Sol",
                    "Porto Moniz", "Ribeira Brava", "Santa Cruz", "Santana", "São Vicente", "Porto Santo")
 
@@ -222,10 +238,14 @@ distritos_madeira <- distritos %>%
 distritos_cont <- distritos %>%
   filter(!Municipio %in% c(ilhas_acores, ilhas_madeira))
 
+
+
 # Azores: Displace and scale the islands.
 distritos_acores_deslocados <- distritos %>%
   filter(Municipio %in% ilhas_acores) %>%
   mutate(geometry = st_geometry(.) + c(16.5, 2.8))
+
+
 centro_acores <- st_centroid(st_union(distritos_acores_deslocados))
 fator_escala <- 0.5714
 distritos_acores <- deslocar_escalar(distritos_acores_deslocados, c(0, 0), centro_acores, fator_escala)
@@ -276,7 +296,7 @@ system.time({
     # Reposition the occurrence points according to their geographical region.
     coordenadas_acores <- coordenadas_sf %>%
       filter(Municipio %in% ilhas_acores) %>%
-      mutate(geometry = st_geometry(.) + c(16.5, 2.8)) %>%
+     mutate(geometry = st_geometry(.) + c(16.5, 2.8)) %>%
       deslocar_escalar(c(0, 0), centro_acores, fator_escala)
     
     coordenadas_madeira <- coordenadas_sf %>%
@@ -286,10 +306,12 @@ system.time({
     
     coordenadas_cont <- coordenadas_sf %>%
       filter(!(Municipio %in% c(ilhas_acores, ilhas_madeira)) & !is.na(Municipio))
+
     
     # Combine all repositioned points.
     coordenadas_corrigidas <- bind_rows(coordenadas_cont, coordenadas_acores, coordenadas_madeira) %>%
       st_transform(crs = st_crs(distritos_reposicionados))
+
     
     # Determine presence/absence for each district based on the corrected points.
     presenca_distritos <- st_intersects(distritos_reposicionados, coordenadas_corrigidas)
@@ -310,30 +332,32 @@ system.time({
       theme(
         legend.title = element_blank(),
         legend.position = "bottom",
+        legend.key.size = unit(0.8, "cm"),
+        legend.text = element_text(size = 16),
+        axis.title = element_text(size=16),
         axis.text = element_blank(),
         axis.ticks = element_blank(),
         panel.grid = element_blank()
-      ) +
-      annotation_scale(location = "br", bar_cols = c("grey60", "white")) +
-      annotation_north_arrow(location = "br", which_north = "true",
-                             pad_x = unit(0.15, "in"), pad_y = unit(0.4, "in"),
-                             style = north_arrow_minimal(fill = "grey40", line_col = "grey20"))
+      ) #+
+      #annotation_scale(location = "br", bar_cols = c("grey60", "white"), text_cex = 2.0) +
+      #annotation_north_arrow(location = "br", which_north = "true",
+      #                       pad_x = unit(0.15, "in"), pad_y = unit(0.4, "in"),
+      #                       style = north_arrow_minimal(fill = "grey40", line_col = "grey20", text_size = 14))
     
     # Save the map as a PNG file.
     ggsave(filename = paste0("Mapas_galhas_web/Municipios_", gsub(" ","_", species_name), ".png"), plot = mapa_final,  #mudar aqui por municipio se for o caso
-           width = 14, height = 8, dpi = 300)
+           width = 14, height = 8, units = "in", dpi = 300)
     
     # --- SHAPEFILE EXPORT ---
     # Save the corrected points as a shapefile.
-    if (nrow(coordenadas_corrigidas) > 0) {
-      st_write(coordenadas_corrigidas, paste0("shapefiles/Municipios_", gsub(" ", "_", species_name), "_points.shp"), delete_layer = TRUE)
-    } else {
-      message(paste("No corrected points to save for species:", species_name))
-    }
+    #if (nrow(coordenadas_corrigidas) > 0) {
+    #  st_write(coordenadas_corrigidas, paste0("shapefiles/Municipios_", gsub(" ", "_", species_name), "_points.shp"), delete_layer = TRUE)
+    #} else {
+    #  message(paste("No corrected points to save for species:", species_name))
+    #}
   }
   message("Todos os mapas e shapefiles para Municipios criados!")
-}) /60 # time in minutes loop
+}) 
 
 
-
-
+write.csv2(levels(as.factor(all_species)),"lista_galhas.csv",row.names = F)
