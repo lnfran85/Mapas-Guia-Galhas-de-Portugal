@@ -1,0 +1,125 @@
+# -------------------- PACKAGES --------------------
+library(sf)
+library(ggplot2)
+library(dplyr)
+library(ggtext)
+library(units)
+
+# -------------------- DIRECTORIOS --------------------
+setwd("C:\\Users\\lnfra\\Documents\\")
+dir.create("Mapas_galhas_web", showWarnings = FALSE)
+
+# -------------------- GRID --------------------
+grid <- st_read("C:\\Users\\lnfra\\Downloads\\utm10+ilhas.gpkg") |>
+  st_make_valid()
+
+st_crs(grid) <- 4326
+
+# -------------------- OBSERVACIONES --------------------
+galhas_inat <- read.csv(
+  "C:\\Users\\lnfra\\Downloads\\observations-663641.csv\\observations-663641.csv"
+) |>
+  mutate(
+    latitude  = ifelse(!is.na(private_latitude)  & private_latitude  != "", private_latitude,  latitude),
+    longitude = ifelse(!is.na(private_longitude) & private_longitude != "", private_longitude, longitude)
+  ) |>
+  filter(!is.na(latitude), !is.na(longitude), !is.na(scientific_name))
+
+pts <- st_as_sf(
+  galhas_inat,
+  coords = c("longitude", "latitude"),
+  crs = 4326
+)
+
+# -------------------- ISLAS --------------------
+ilhas_acores <- c("Graciosa","Flores","SantaMaria","SaoJorge","SaoMiguel",
+                  "Corvo","Faial","Pico","Terceira")
+ilhas_madeira <- c("Selvagens","Desertas","Madeira","PortoSanto")
+campo_ilhas <- "utm10"
+
+# -------------------- INTERSECCIÓN --------------------
+inter <- st_intersects(grid, pts)
+
+# -------------------- RIQUEZA POR CUADRÍCULA --------------------
+grid$riqueza <- sapply(inter, function(idx) {
+  if (length(idx) == 0) return(0)
+  length(unique(pts$scientific_name[idx]))
+})
+
+# -------------------- REPOSICIONAR ISLAS --------------------
+grid_cont <- grid |> filter(!.data[[campo_ilhas]] %in% c(ilhas_acores, ilhas_madeira))
+st_crs(grid_cont) <- 4326
+
+grid_madeira <- grid |> filter(.data[[campo_ilhas]] %in% ilhas_madeira)
+st_geometry(grid_madeira) <- st_geometry(grid_madeira) + c(5, 6)
+st_crs(grid_madeira) <- 4326
+
+grid_acores <- grid |> filter(.data[[campo_ilhas]] %in% ilhas_acores)
+st_geometry(grid_acores) <- st_geometry(grid_acores) + c(16.5, 2.8)
+st_crs(grid_acores) <- 4326
+
+grid_plot <- rbind(grid_cont, grid_acores, grid_madeira)
+st_crs(grid_plot) <- 4326
+
+# -------------------- LINEA SEPARADORA --------------------
+linha_separadora <- st_sfc(
+  st_linestring(rbind(c(-13.3, 41.0), c(-10.5, 39.5))),
+  crs = 4326
+) |> st_sf()
+
+linha_plot <- st_transform(linha_separadora, 4326)
+
+bbox <- st_bbox(grid_plot)
+
+# -------------------- PALETA PARA RIQUEZA --------------------
+pal_riqueza <- scale_fill_viridis_c(
+  option = "C",
+  direction = 1,
+  na.value = "grey90",
+  name = "Riqueza\nde espécies"
+)
+
+# -------------------- MAPA --------------------
+mapa_riqueza <- ggplot() +
+  geom_sf(
+    data = grid_plot,
+    aes(fill = riqueza),
+    color = "grey50",
+    linewidth = 0.25
+  ) +
+  geom_sf(
+    data = linha_plot,
+    color = "grey50",
+    linewidth = 0.3
+  ) +
+  pal_riqueza +
+  labs(
+    title = "Riqueza de espécies de galhas",
+    subtitle = "Número de espécies distintas por quadrícula (10 × 10 km)"
+  ) +
+  coord_sf(
+    xlim = c(bbox["xmin"], bbox["xmax"]),
+    ylim = c(bbox["ymin"], bbox["ymax"]),
+    expand = FALSE
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    panel.grid = element_blank(),
+    legend.position = "right",
+    plot.title = element_text(size = 14, face = "bold"),
+    plot.subtitle = element_text(size = 10),
+    plot.margin = margin(20,10,10,10)
+  )
+
+# -------------------- EXPORTAR --------------------
+ggsave(
+  "Mapas_galhas_web/Riqueza_especies_galhas.png",
+  mapa_riqueza,
+  width = 16,
+  height = 9,
+  dpi = 300
+)
+
+message("✔ MAPA DE RIQUEZA EXPORTADO")
