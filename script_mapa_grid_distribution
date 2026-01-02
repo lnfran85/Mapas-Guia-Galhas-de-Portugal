@@ -3,123 +3,201 @@ library(sf)
 library(ggplot2)
 library(dplyr)
 library(ggtext)
-library(units)
 
-# -------------------- DIRECTORIOS --------------------
+safe_filename <- function(x) {
+  x %>%
+    gsub("×", "x", .) %>%
+    gsub("[^A-Za-z0-9_\\-]", "_", .) %>%
+    gsub("_+", "_", .) %>%
+    gsub("^_|_$", "", .)
+}
+
+# -------------------- DIRECTORIES --------------------
 setwd("C:\\Users\\lnfra\\Documents\\")
-dir.create("Mapas_galhas_web", showWarnings = FALSE)
 
-# -------------------- GRID --------------------
-grid <- st_read("C:\\Users\\lnfra\\Downloads\\utm10+ilhas.gpkg") |>
-  st_make_valid()
+if (!dir.exists("Mapas_galhas_web")) dir.create("Mapas_galhas_web")
+if (!dir.exists("shapefiles")) dir.create("shapefiles")
 
-st_crs(grid) <- 4326
+# -------------------- LOAD DATA --------------------
+grid <- st_read("C:\\Users\\lnfra\\Downloads\\utm10+ilhas.gpkg") %>%
+  st_make_valid() 
 
-# -------------------- OBSERVACIONES --------------------
-galhas_inat <- read.csv(
-  "C:\\Users\\lnfra\\Downloads\\observations-663641.csv\\observations-663641.csv"
-) |>
+if (is.na(st_crs(grid))) st_crs(grid) <- 4326
+
+galhas_inat <- read.csv("C:\\Users\\lnfra\\Downloads\\observations-663641.csv\\observations-663641.csv") %>%
   mutate(
-    latitude  = ifelse(!is.na(private_latitude)  & private_latitude  != "", private_latitude,  latitude),
+    latitude  = ifelse(!is.na(private_latitude) & private_latitude != "", private_latitude, latitude),
     longitude = ifelse(!is.na(private_longitude) & private_longitude != "", private_longitude, longitude)
-  ) |>
-  filter(!is.na(latitude), !is.na(longitude), !is.na(scientific_name))
+  )
 
-pts <- st_as_sf(
-  galhas_inat,
-  coords = c("longitude", "latitude"),
-  crs = 4326
-)
-
-# -------------------- ISLAS --------------------
-ilhas_acores <- c("Graciosa","Flores","SantaMaria","SaoJorge","SaoMiguel",
-                  "Corvo","Faial","Pico","Terceira")
-ilhas_madeira <- c("Selvagens","Desertas","Madeira","PortoSanto")
+# -------------------- ISLAND DEFINITIONS --------------------
+ilhas_acores <- c("Graciosa", "Flores", "SantaMaria",
+                  "SaoJorge", "SaoMiguel", "Corvo",
+                  "Faial", "Pico", "Terceira")
+ilhas_madeira <- c("Selvagens","Desertas","Madeira", "PortoSanto")
 campo_ilhas <- "utm10"
 
-# -------------------- INTERSECCIÓN --------------------
-inter <- st_intersects(grid, pts)
-
-# -------------------- RIQUEZA POR CUADRÍCULA --------------------
-grid$riqueza <- sapply(inter, function(idx) {
-  if (length(idx) == 0) return(0)
-  length(unique(pts$scientific_name[idx]))
-})
-
-# -------------------- REPOSICIONAR ISLAS --------------------
-grid_cont <- grid |> filter(!.data[[campo_ilhas]] %in% c(ilhas_acores, ilhas_madeira))
-st_crs(grid_cont) <- 4326
-
-grid_madeira <- grid |> filter(.data[[campo_ilhas]] %in% ilhas_madeira)
-st_geometry(grid_madeira) <- st_geometry(grid_madeira) + c(5, 6)
-st_crs(grid_madeira) <- 4326
-
-grid_acores <- grid |> filter(.data[[campo_ilhas]] %in% ilhas_acores)
-st_geometry(grid_acores) <- st_geometry(grid_acores) + c(16.5, 2.8)
-st_crs(grid_acores) <- 4326
-
-grid_plot <- rbind(grid_cont, grid_acores, grid_madeira)
-st_crs(grid_plot) <- 4326
+# -------------------- COLORES POR RARIDAD --------------------
+col_raridade <- c(
+  "Muito restrita" = "#B2182B",  # rojo oscuro
+  "Restrita"       = "#EF8A62",  # naranja
+  "Moderada"       = "#FDAE61",  # naranja-dorado intenso
+  "Ampla"          = "#91CF60",  # verde claro
+  "Muito ampla"    = "#4575B4"   # azul intenso
+)
 
 # -------------------- LINEA SEPARADORA --------------------
 linha_separadora <- st_sfc(
   st_linestring(rbind(c(-13.3, 41.0), c(-10.5, 39.5))),
   crs = 4326
-) |> st_sf()
+) %>% st_sf()
 
-linha_plot <- st_transform(linha_separadora, 4326)
-
-bbox <- st_bbox(grid_plot)
-
-# -------------------- PALETA PARA RIQUEZA --------------------
-pal_riqueza <- scale_fill_viridis_c(
-  option = "C",
-  direction = 1,
-  na.value = "grey90",
-  name = "Riqueza\nde espécies"
+# -------------------- RESULTADOS --------------------
+resumo_especies <- data.frame(
+  especie = character(),
+  quadrículas_t = integer(),
+  quadrículas_cont = integer(),
+  quadrículas_ilha = integer(),
+  raridade = character(),
+  stringsAsFactors = FALSE
 )
 
-# -------------------- MAPA --------------------
-mapa_riqueza <- ggplot() +
-  geom_sf(
-    data = grid_plot,
-    aes(fill = riqueza),
-    color = "grey50",
-    linewidth = 0.25
-  ) +
-  geom_sf(
-    data = linha_plot,
-    color = "grey50",
-    linewidth = 0.3
-  ) +
-  pal_riqueza +
-  labs(
-    title = "Riqueza de espécies de galhas",
-    subtitle = "Número de espécies distintas por quadrícula (10 × 10 km)"
-  ) +
-  coord_sf(
-    xlim = c(bbox["xmin"], bbox["xmax"]),
-    ylim = c(bbox["ymin"], bbox["ymax"]),
-    expand = FALSE
-  ) +
-  theme_minimal() +
-  theme(
-    axis.text = element_blank(),
-    axis.ticks = element_blank(),
-    panel.grid = element_blank(),
-    legend.position = "right",
-    plot.title = element_text(size = 14, face = "bold"),
-    plot.subtitle = element_text(size = 10),
-    plot.margin = margin(20,10,10,10)
+species_list <- sort(unique(galhas_inat$scientific_name))
+
+# ============================================================
+# LOOP POR ESPECIE
+# ============================================================
+for (species_name in species_list) {
+  
+  message("Procesando: ", species_name)
+  
+  coords <- galhas_inat %>%
+    filter(scientific_name == species_name) %>%
+    select(longitude, latitude)
+  
+  if (nrow(coords) == 0) next
+  
+  pts <- st_as_sf(coords, coords = c("longitude", "latitude"), crs = 4326)
+  
+  # ---------------- INTERSECCIÓN CON GRID ----------------
+  inter <- st_intersects(grid, pts)
+  presenca <- lengths(inter) > 0
+  n_quad <- sum(presenca)
+  if (n_quad == 0) next
+  
+  grid$presente <- presenca
+  
+  # Totales por región
+  total_cont <- sum(!grid[[campo_ilhas]] %in% c(ilhas_acores, ilhas_madeira))
+  total_ilhas <- sum(grid[[campo_ilhas]] %in% c(ilhas_acores, ilhas_madeira))
+  
+  quad_cont <- sum(grid$presente & !grid[[campo_ilhas]] %in% c(ilhas_acores, ilhas_madeira))
+  quad_ilhas <- sum(grid$presente & grid[[campo_ilhas]] %in% c(ilhas_acores, ilhas_madeira))
+  quad_total <- sum(grid$presente)
+  
+  # Categoría según nº de cuadrículas
+  categoria <- dplyr::case_when(
+    n_quad == 1             ~ "Muito restrita",
+    n_quad >= 2 & n_quad <= 5    ~ "Restrita",
+    n_quad >= 6 & n_quad <= 25   ~ "Moderada",
+    n_quad >= 26 & n_quad <= 125 ~ "Ampla",
+    n_quad > 125            ~ "Muito ampla"
   )
+  
+  grid$raridade <- ifelse(grid$presente, categoria, NA)
+  
+  # ---------------- SUBTITULO NEGRO ----------------
+  subtitle_text <- paste0(
+    quad_total, " / ", nrow(grid), " quadrículas totais | ",
+    quad_cont, " / ", total_cont, " continente | ",
+    quad_ilhas, " / ", total_ilhas, " ilhas"
+  )
+  
+  # ---------------- REPOSICIONAR ISLAS ----------------
+  grid_cont <- grid %>% filter(!.data[[campo_ilhas]] %in% c(ilhas_acores, ilhas_madeira))
+  grid_madeira <- grid %>% filter(.data[[campo_ilhas]] %in% ilhas_madeira)
+  st_geometry(grid_madeira) <- st_geometry(grid_madeira) + c(5, 6)
+  st_crs(grid_madeira) <- st_crs(grid)
+  
+  grid_acores <- grid %>% filter(.data[[campo_ilhas]] %in% ilhas_acores)
+  st_geometry(grid_acores) <- st_geometry(grid_acores) + c(16.5, 2.8)
+  centro_acores <- st_centroid(st_union(grid_acores))
+  st_geometry(grid_acores) <- (st_geometry(grid_acores) - centro_acores) * 0.5714 + centro_acores
+  st_crs(grid_acores) <- st_crs(grid)
+  
+  grid_plot <- rbind(grid_cont, grid_acores, grid_madeira)
+  st_crs(grid_plot) <- st_crs(grid)
+  
+  linha_separadora <- st_transform(linha_separadora, st_crs(grid_plot))
+  
+  # ---------------- CREAR MAPA ----------------
+  mapa <- ggplot() +
+    geom_sf(
+      data = grid_plot,
+      aes(fill = presente),
+      color = "grey50",
+      linewidth = 0.3
+    ) +
+    scale_fill_manual(
+      values = c("TRUE" = "darkkhaki", "FALSE" = "lightgrey"),
+      labels = c("TRUE" = "Com presença", "FALSE" = "Sem presença"),
+      na.value = "lightgrey"
+    ) +
+    geom_sf(data = linha_separadora, color = "grey50", linewidth = 0.3) +
+    labs(
+      title = bquote(paste("Distribuição de ", italic(.(species_name)))),
+      subtitle = subtitle_text
+    ) +
+    # ---- anotación alineada a la izquierda ----
+  geom_richtext(
+    aes(
+      x = -Inf, y = Inf, label = paste0("Frequência na área de distribuição: ",
+                                             "<span style='color:", col_raridade[categoria], 
+                                             "; font-weight:bold;'>",
+                                             categoria,
+                                             "</span>")
+    ),
+    hjust = 0, vjust = 1,
+    fill = "#f5f5f5", alpha= 0.7, label.color = NA,
+    color = "black",
+    fontface = "bold",
+    size = 3.2
+  )  +
+    theme_minimal() +
+    theme(
+      legend.title = element_blank(),
+      legend.position = "bottom",
+      legend.key.size = unit(0.8, "cm"),
+      legend.text = element_text(size = 11),
+      axis.text = element_blank(),
+      axis.ticks = element_blank(),
+      panel.grid = element_blank(),
+      plot.title = element_text(size = 14, face = "bold"),
+      plot.subtitle = element_text(size = 10),
+      plot.margin = margin(t = 20, r = 10, b = 10, l = 10),
+      axis.title = element_blank()
+    )
+  
+  # ---------------- EXPORTAR MAPA ----------------
+  file <- paste0("Mapas_galhas_web/Grid_", safe_filename(species_name), ".png")
+  ggsave(file, mapa, width = 16, height = 9, dpi = 300)
+  
+  # ---------------- ACTUALIZAR RESUMO ----------------
+  resumo_especies <- rbind(
+    resumo_especies,
+    data.frame(
+      especie = species_name,
+      quadrículas_t = n_quad,
+      quadrículas_cont = quad_cont,
+      quadrículas_ilha = quad_ilhas,
+      raridade = categoria
+    )
+  )
+  
+  message("✔ Exportado")
+}
 
-# -------------------- EXPORTAR --------------------
-ggsave(
-  "Mapas_galhas_web/Riqueza_especies_galhas.png",
-  mapa_riqueza,
-  width = 16,
-  height = 9,
-  dpi = 300
-)
+# ---------------- EXPORTAR CSV ----------------
+write.csv2(resumo_especies, "Mapas_galhas_web/Raridade_galhas.csv", row.names = FALSE)
+message("✔ PROCESO COMPLETO")
 
-message("✔ MAPA DE RIQUEZA EXPORTADO")
