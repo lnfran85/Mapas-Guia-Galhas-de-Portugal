@@ -1,0 +1,147 @@
+# -------------------- PACKAGES --------------------
+library(sf)
+library(dplyr)
+library(ggplot2)
+library(elevatr)
+library(rnaturalearth)
+library(rnaturalearthhires)
+library(ggtext)
+
+# -------------------- DIRECTORIOS --------------------
+setwd("C:\\Users\\lnfra\\Documents\\")
+if(!dir.exists("Mapas_galhas_web")) dir.create("Mapas_galhas_web")
+if(!dir.exists("Mapas_galhas_web/Distribucion_por_especie")) dir.create("Mapas_galhas_web/Distribucion_por_especie")
+
+# -------------------- CARGAR DATOS --------------------
+galhas_inat <- read.csv("C:\\Users\\lnfra\\Downloads\\observations-664933.csv\\observations-664933.csv") %>%
+  mutate(
+    latitude  = ifelse(!is.na(private_latitude) & private_latitude!="", private_latitude, latitude),
+    longitude = ifelse(!is.na(private_longitude) & private_longitude!="", private_longitude, longitude)
+  )
+
+# -------------------- CONVERTIR A SF --------------------
+galhas_sf <- st_as_sf(galhas_inat, coords = c("longitude","latitude"), crs=4326)
+
+# -------------------- OBTENER ALTITUD --------------------
+cat("Calculando altitud...\n")
+elev_data <- get_elev_point(galhas_sf, prj=st_crs(galhas_sf)$proj4string, src="aws")
+galhas_inat$altitude <- elev_data$elevation
+
+# -------------------- OBTENER DISTANCIA AL MAR --------------------
+cat("Calculando distancia al mar...\n")
+coast <- ne_coastline(scale="medium", returnclass="sf")
+coast <- st_transform(coast, crs=4326)
+dist_matrix <- st_distance(galhas_sf, coast)
+galhas_inat$distance_to_sea <- apply(dist_matrix, 1, min)/1000  # km
+
+# -------------------- GUARDAR CSV --------------------
+write.csv2(galhas_inat, "Mapas_galhas_web/Galhas_inat_altitud_distancia.csv", row.names=FALSE)
+
+# -------------------- LISTA DE ESPECIES --------------------
+species_list <- sort(unique(galhas_inat$scientific_name))
+cat("Número de especies:", length(species_list), "\n")
+
+# -------------------- GRAFICOS GLOBALES DE DENSIDAD --------------------
+cat("Generando gráficos globales de densidad...\n")
+
+# Altitud global
+gg_alt_global <- ggplot(galhas_inat, aes(x=altitude, color=scientific_name)) +
+  geom_density(size=1) +
+  labs(title="Distribución de altitud - todas las especies",
+       x="Altitud (m)", y="Densidad") +
+  theme_minimal() +
+  theme(legend.position="right",
+        plot.title = element_text(face="bold", size=14),
+        axis.title = element_text(face="bold"))
+
+ggsave("Mapas_galhas_web/Distribucion_altitud_global.png", gg_alt_global, width=12, height=7, dpi=300)
+
+# Distancia al mar global
+gg_dist_global <- ggplot(galhas_inat, aes(x=distance_to_sea, color=scientific_name)) +
+  geom_density(size=1) +
+  labs(title="Distribución de distancia al mar - todas las especies",
+       x="Distancia al mar (km)", y="Densidad") +
+  theme_minimal() +
+  theme(legend.position="right",
+        plot.title = element_text(face="bold", size=14),
+        axis.title = element_text(face="bold"))
+
+ggsave("Mapas_galhas_web/Distribucion_distancia_mar_global.png", gg_dist_global, width=12, height=7, dpi=300)
+
+# -------------------- GRAFICOS INDIVIDUALES POR ESPECIE --------------------
+cat("Generando gráficos individuales por especie...\n")
+
+for(sp in species_list){
+  cat("Procesando especie:", sp, "\n")
+  
+  sp_data <- galhas_inat %>% filter(scientific_name == sp)
+  
+  if(nrow(sp_data) > 0){
+    # 1️⃣ Densidad Altitud
+    gg_alt <- ggplot(sp_data, aes(x=altitude)) +
+      geom_density(fill="steelblue", alpha=0.5, color="steelblue") +
+      labs(title=paste0(sp, "*"),
+           x="Altitude (m)", y="Densidade") +
+      theme_minimal() +
+      theme(plot.title = element_markdown(size=14, face="bold"),
+            axis.title = element_text(face="bold"))
+    
+    ggsave(paste0("Mapas_galhas_web/Distribucion_por_especie/", sp, "_altitud.png"),
+           gg_alt, width=10, height=6, dpi=300)
+    
+    # 2️⃣ Densidad Distancia al mar
+    gg_dist <- ggplot(sp_data, aes(x=distance_to_sea)) +
+      geom_density(fill="darkgreen", alpha=0.5, color="darkgreen") +
+      labs(title=paste0(sp, "*"),
+           x="Distancia ao mar (km)", y="Densidade") +
+      theme_minimal() +
+      theme(plot.title = element_markdown(size=14, face="bold"),
+            axis.title = element_text(face="bold"))
+    
+    ggsave(paste0("Mapas_galhas_web/Distribucion_por_especie/", sp, "_distancia_mar.png"),
+           gg_dist, width=10, height=6, dpi=300)
+    
+    # 3️⃣ Bivariado Altitud vs Distancia al mar
+    gg_biv <- ggplot(sp_data, aes(x=distance_to_sea, y=altitude)) +
+      geom_point(color="purple", alpha=0.6) +
+      geom_smooth(method="loess", color="red", se=TRUE) +
+      labs(title=paste0(sp, "*"),
+           x="Distancia ao mar (km)", y="Altitude (m)") +
+      theme_minimal() +
+      theme(plot.title = element_markdown(size=14, face="bold"),
+            axis.title = element_text(face="bold"))
+    
+    ggsave(paste0("Mapas_galhas_web/Distribucion_por_especie/", sp, "_altitud_vs_distancia_mar.png"),
+           gg_biv, width=10, height=6, dpi=300)
+    
+    # 4️⃣ Violin plot Altitud
+    gg_violin_alt <- ggplot(sp_data, aes(x=scientific_name, y=altitude)) +
+      geom_violin(fill="steelblue", alpha=0.5) +
+      labs(title=paste0(sp, "*"),
+           x="", y="Altitude (m)") +
+      theme_minimal() +
+      theme(plot.title = element_markdown(size=14, face="bold"),
+            axis.text.x = element_text(angle=45, hjust=1),
+            axis.title = element_text(face="bold"))
+    
+    ggsave(paste0("Mapas_galhas_web/Distribucion_por_especie/", sp, "_violin_altitud.png"),
+           gg_violin_alt, width=8, height=6, dpi=300)
+    
+    # 5️⃣ Violin plot Distancia al mar
+    gg_violin_dist <- ggplot(sp_data, aes(x=scientific_name, y=distance_to_sea)) +
+      geom_violin(fill="darkgreen", alpha=0.5) +
+      labs(title=paste0(sp, "*"),
+           x="", y="Distancia ao mar (km)") +
+      theme_minimal() +
+      theme(plot.title = element_markdown(size=14, face="bold"),
+            axis.text.x = element_text(angle=45, hjust=1),
+            axis.title = element_text(face="bold"))
+    
+    ggsave(paste0("Mapas_galhas_web/Distribucion_por_especie/", sp, "_violin_distancia_mar.png"),
+           gg_violin_dist, width=8, height=6, dpi=300)
+  }
+  
+  cat("✔ Guardado:", sp, "\n")
+}
+
+cat("¡Todos los gráficos de densidad, bivariados y violin plots generados con éxito!\n")
