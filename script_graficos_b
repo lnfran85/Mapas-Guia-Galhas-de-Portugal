@@ -1,0 +1,115 @@
+# -------------------- PACKAGES --------------------
+library(sf)
+library(dplyr)
+library(ggplot2)
+library(elevatr)
+library(rnaturalearth)
+library(rnaturalearthhires)
+library(ggtext)
+
+# -------------------- DIRECTORIOS --------------------
+setwd("C:\\Users\\lnfra\\Documents\\")
+if(!dir.exists("Mapas_galhas_web")) dir.create("Mapas_galhas_web")
+if(!dir.exists("Mapas_galhas_web/Distribucion_por_richness")) dir.create("Mapas_galhas_web/Distribucion_por_richness")
+
+# -------------------- CARGAR DATOS --------------------
+galhas_inat <- read.csv("C:\\Users\\lnfra\\Downloads\\observations-664933.csv\\observations-664933.csv") %>%
+  mutate(
+    latitude  = ifelse(!is.na(private_latitude) & private_latitude!="", private_latitude, latitude),
+    longitude = ifelse(!is.na(private_longitude) & private_longitude!="", private_longitude, longitude)
+  )
+
+# -------------------- CONVERTIR A SF --------------------
+galhas_sf <- st_as_sf(galhas_inat, coords = c("longitude","latitude"), crs=4326)
+
+# -------------------- OBTENER ALTITUD --------------------
+cat("Calculando altitud...\n")
+elev_data <- get_elev_point(galhas_sf, prj=st_crs(galhas_sf)$proj4string, src="aws")
+galhas_inat$altitude <- elev_data$elevation
+
+# -------------------- OBTENER DISTANCIA AL MAR --------------------
+cat("Calculando distancia al mar...\n")
+coast <- ne_coastline(scale="medium", returnclass="sf")
+coast <- st_transform(coast, crs=4326)
+dist_matrix <- st_distance(galhas_sf, coast)
+galhas_inat$distance_to_sea <- apply(dist_matrix, 1, min)/1000  # km
+
+# -------------------- CALCULAR RIQUEZA DE ESPECIES POR UBICACION --------------------
+cat("Calculando riqueza de especies por coordenada...\n")
+richness_df <- galhas_inat %>%
+  group_by(latitude, longitude) %>%
+  summarise(richness = n_distinct(scientific_name), .groups = "drop")
+
+# Convertir a SF
+richness_sf <- st_as_sf(richness_df, coords = c("longitude", "latitude"), crs = 4326)
+
+# Añadir altitud y distancia al mar promedio por coordenada
+richness_sf$altitude <- sapply(1:nrow(richness_sf), function(i){
+  mean(galhas_inat$altitude[galhas_inat$latitude == st_coordinates(richness_sf)[i,2] &
+                              galhas_inat$longitude == st_coordinates(richness_sf)[i,1]], na.rm=TRUE)
+})
+
+richness_sf$distance_to_sea <- sapply(1:nrow(richness_sf), function(i){
+  mean(galhas_inat$distance_to_sea[galhas_inat$latitude == st_coordinates(richness_sf)[i,2] &
+                                     galhas_inat$longitude == st_coordinates(richness_sf)[i,1]], na.rm=TRUE)
+})
+
+# Guardar CSV
+write.csv2(richness_sf %>% st_drop_geometry(), "Mapas_galhas_web/Riqueza_por_ubicacion.csv", row.names=FALSE)
+
+# -------------------- GRAFICOS DE DENSIDAD --------------------
+cat("Generando gráficos de densidad por riqueza...\n")
+
+# Densidad Altitud
+gg_alt <- ggplot(richness_sf, aes(x=altitude)) +
+  geom_density(fill="steelblue", alpha=0.5, color="steelblue") +
+  labs(title="Distribución de altitud según riqueza de especies",
+       x="Altitud (m)", y="Densidad") +
+  theme_minimal() +
+  theme(plot.title = element_text(face="bold", size=14),
+        axis.title = element_text(face="bold"))
+
+ggsave("Mapas_galhas_web/Distribucion_por_richness/Altitud_richness.png", gg_alt, width=10, height=6, dpi=300)
+
+# Densidad Distancia al mar
+gg_dist <- ggplot(richness_sf, aes(x=distance_to_sea)) +
+  geom_density(fill="darkgreen", alpha=0.5, color="darkgreen") +
+  labs(title="Distribución de distancia al mar según riqueza de especies",
+       x="Distancia al mar (km)", y="Densidad") +
+  theme_minimal() +
+  theme(plot.title = element_text(face="bold", size=14),
+        axis.title = element_text(face="bold"))
+
+ggsave("Mapas_galhas_web/Distribucion_por_richness/Distancia_mar_richness.png", gg_dist, width=10, height=6, dpi=300)
+
+# -------------------- GRAFICO BIVARIADO --------------------
+gg_biv <- ggplot(richness_sf, aes(x=distance_to_sea, y=altitude, color=richness)) +
+  geom_point(alpha=0.6, size=2) +
+  scale_color_viridis_c(option="plasma") +
+  geom_smooth(method="loess", color="red", se=TRUE) +
+  labs(title="Altitud vs Distancia al mar según riqueza de especies",
+       x="Distancia al mar (km)", y="Altitud (m)", color="Riqueza") +
+  theme_minimal() +
+  theme(plot.title = element_text(face="bold", size=14),
+        axis.title = element_text(face="bold"))
+
+ggsave("Mapas_galhas_web/Distribucion_por_richness/Altitud_vs_distancia_richness.png", gg_biv, width=10, height=6, dpi=300)
+
+# -------------------- VIOLIN PLOTS --------------------
+gg_violin_alt <- ggplot(richness_sf, aes(x=factor(1), y=altitude)) +
+  geom_violin(fill="steelblue", alpha=0.5) +
+  labs(title="Violin plot Altitud según riqueza de especies", x="", y="Altitud (m)") +
+  theme_minimal() +
+  theme(plot.title = element_text(face="bold", size=14))
+
+ggsave("Mapas_galhas_web/Distribucion_por_richness/Violin_altitud_richness.png", gg_violin_alt, width=8, height=6, dpi=300)
+
+gg_violin_dist <- ggplot(richness_sf, aes(x=factor(1), y=distance_to_sea)) +
+  geom_violin(fill="darkgreen", alpha=0.5) +
+  labs(title="Violin plot Distancia al mar según riqueza de especies", x="", y="Distancia al mar (km)") +
+  theme_minimal() +
+  theme(plot.title = element_text(face="bold", size=14))
+
+ggsave("Mapas_galhas_web/Distribucion_por_richness/Violin_distancia_richness.png", gg_violin_dist, width=8, height=6, dpi=300)
+
+cat("¡Todos los gráficos por riqueza de especies generados con éxito!\n")
