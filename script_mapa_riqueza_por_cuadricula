@@ -1,0 +1,101 @@
+# -------------------- PACKAGES --------------------
+library(sf)
+library(ggplot2)
+library(dplyr)
+library(viridis)
+library(cowplot)
+
+# -------------------- DIRECTORIES --------------------
+setwd("C:\\Users\\lnfra\\Documents\\")
+if (!dir.exists("Mapas_galhas_web")) dir.create("Mapas_galhas_web")
+
+# -------------------- LOAD DATA --------------------
+grid <- st_read("C:\\Users\\lnfra\\Downloads\\utm10+ilhas.gpkg") %>%
+  st_make_valid()
+if (is.na(st_crs(grid))) st_crs(grid) <- 4326
+
+galhas_inat <- read.csv("C:\\Users\\lnfra\\Downloads\\observations-663641.csv\\observations-663641.csv") %>%
+  mutate(
+    latitude  = ifelse(!is.na(private_latitude) & private_latitude != "", private_latitude, latitude),
+    longitude = ifelse(!is.na(private_longitude) & private_longitude != "", private_longitude, longitude)
+  )
+
+# -------------------- ISLAND DEFINITIONS --------------------
+ilhas_acores <- c("Graciosa", "Flores", "SantaMaria",
+                  "SaoJorge", "SaoMiguel", "Corvo",
+                  "Faial", "Pico", "Terceira")
+ilhas_madeira <- c("Selvagens","Desertas","Madeira", "PortoSanto")
+campo_ilhas <- "utm10"
+
+# -------------------- LINEA SEPARADORA --------------------
+linha_separadora <- st_sfc(
+  st_linestring(rbind(c(-13.3, 41.0), c(-10.5, 39.5))),
+  crs = 4326
+) %>% st_sf()
+
+# -------------------- CALCULAR RIQUEZA --------------------
+pts_sf <- st_as_sf(galhas_inat, coords = c("longitude", "latitude"), crs = 4326)
+inter <- st_intersects(grid, pts_sf)
+grid$riqueza <- lengths(inter)  # número de especies por cuadrícula
+
+# -------------------- REPOSICIONAR ISLAS --------------------
+grid_cont <- grid %>% filter(!.data[[campo_ilhas]] %in% c(ilhas_acores, ilhas_madeira))
+grid_madeira <- grid %>% filter(.data[[campo_ilhas]] %in% ilhas_madeira)
+st_geometry(grid_madeira) <- st_geometry(grid_madeira) + c(5, 6)
+st_crs(grid_madeira) <- st_crs(grid)
+grid_acores <- grid %>% filter(.data[[campo_ilhas]] %in% ilhas_acores)
+st_geometry(grid_acores) <- st_geometry(grid_acores) + c(16.5, 2.8)
+centro_acores <- st_centroid(st_union(grid_acores))
+st_geometry(grid_acores) <- (st_geometry(grid_acores) - centro_acores) * 0.5714 + centro_acores
+st_crs(grid_acores) <- st_crs(grid)
+grid_plot <- rbind(grid_cont, grid_acores, grid_madeira)
+st_crs(grid_plot) <- st_crs(grid)
+linha_separadora <- st_transform(linha_separadora, st_crs(grid_plot))
+
+# -------------------- MAPA PRINCIPAL --------------------
+mapa <- ggplot() +
+  geom_sf(data = grid_plot, aes(fill = riqueza), color = "grey50", linewidth = 0.3) +
+  geom_sf(data = linha_separadora, color = "grey40", linewidth = 0.4) +
+  scale_fill_viridis_c(option = "magma", direction = -1, guide = "none") +
+  labs(
+    title = "Riqueza de espécies de galhas",
+    subtitle = "Número de espécies distintas por quadrícula UTM 10×10 km"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    panel.grid = element_blank(),
+    plot.margin = margin(10, 10, 10, 10)
+  )
+
+# -------------------- LEYENDA COMO GRÁFICO --------------------
+legend <- ggplot(data.frame(x = 1:100, y = 1), aes(x = x, y = y, fill = x)) +
+  geom_tile() +
+  scale_fill_viridis_c(option = "magma", direction = -1, name = "") +
+  theme_void() +
+  theme(
+    legend.position = "bottom",
+    legend.key.width = unit(3, "cm"),
+    legend.key.height = unit(0.4, "cm"),
+    legend.title = element_text(size = 8),
+    legend.text = element_text(size = 7)
+  )
+
+# Extraer la leyenda como grob
+legend_grob <- cowplot::get_legend(legend)
+
+# -------------------- COMBINAR MAPA + LEYENDA --------------------
+final_map <- ggdraw() +
+  draw_plot(mapa) +
+  draw_grob(legend_grob, x = 0.15, y = 0.02, width = 0.75, height = 0.05)
+
+# -------------------- EXPORTAR --------------------
+ggsave("Mapas_galhas_web/Riqueza_galhas.png", final_map, width = 16, height = 9, dpi = 300)
+
+# -------------------- TABLA FINAL --------------------
+tabla_riqueza <- grid_plot %>%
+  st_drop_geometry() %>%
+  select(!!campo_ilhas, riqueza)
+
+write.csv2(tabla_riqueza, "Mapas_galhas_web/Riqueza_galhas.csv", row.names = FALSE)
